@@ -1,0 +1,57 @@
+
+struct ProofParams {
+    int nQueries;
+    int logBlowupFactor;
+    int powBits;
+    int friLastLayerDegBound;
+    int nFriSteps;
+    int[Config.MAX_FRI_STEPS] friSteps;
+}
+
+struct Proof {
+    int proofSize;
+    int[Config.MAX_PROOF_SIZE] vals;
+}
+
+struct TastMetadata {
+    int nTasks;
+    int[Config.MAX_TASKS] taskOutputSizes;
+    int[Config.MAX_TASKS] programHashes;
+}
+
+struct CairoAuxInput {
+    int ecdsaBeginAddr;
+    int ecdsaStopPtr;
+    int publicMemoryPaddingAddr;
+    int publicMemoryPaddingValue;
+    int nPublicMemoryPages;
+    MemoryPage[Config.MAX_PUBLIC_INPUT_MEMORY_PAGES] publicMemory;
+}
+
+struct MemoryPage {
+    int firstAddress;
+    int pageSize;
+    int pageHash;
+    int cumulativeProduct;
+}
+
+library GPSStatementVerifier {
+
+    function verifyProof(
+        ProofParams proofParams,
+        Proof proof,
+        TastMetadata taskMetadata,
+        CairoAuxInput cairoAuxInput) : bool {
+
+        // We are using verifier layout 1 by default.
+        // https://github.com/starkware-libs/starkex-contracts/tree/master/evm-verifier/solidity/contracts/cpu/layout1
+
+        // TODO: register public memory main page
+
+        // TODO: verify proof 
+
+    }
+            
+
+}
+

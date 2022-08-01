@@ -1,0 +1,9 @@
+
+library Config {
+
+    static const int MAX_PROOF_SIZE = 500; 
+    static const int MAX_FRI_STEPS = 10;
+    static const int MAX_PUBLIC_INPUT_MEMORY_PAGES = 20;
+
+
+}
