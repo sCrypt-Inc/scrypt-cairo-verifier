@@ -1,0 +1,9 @@
+import "../contracts/primeField.scrypt";
+
+contract TestPrimeField {
+
+    public function testFmul(int a, int b, int res) {
+        require(PrimeFieldElement.fmul(a, b) == res);
+    }
+
+}

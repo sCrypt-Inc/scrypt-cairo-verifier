@@ -2,8 +2,37 @@
 library Config {
 
     static const int MAX_PROOF_SIZE = 500; 
+    static const int MAX_OUTPUT_SIZE = 1 << 30 - 1; // TODO
+    static const int MAX_N_TREE_PAIRS = 1 << 20 - 1; // TODO
     static const int MAX_FRI_STEPS = 10;
     static const int MAX_PUBLIC_INPUT_MEMORY_PAGES = 20;
 
+    static const int MAX_REGISTRY_SIZE = 500; // TODO
+
+    static const int N_WORDS_PER_PUBLIC_MEMORY_ENTRY = 2;
+    static const int MAX_PUBLIC_MEMORY_WORDS = N_WORDS_PER_PUBLIC_MEMORY_ENTRY * 300; // TODO
+
+    static const int INITIAL_PC = 325;
+
+    static const int OFFSET_N_PUBLIC_MEMORY_PAGES = 18;
+
+    static const int OFFSET_OUTPUT_BEGIN_ADDR = 8;
+
+    static cosnt int OUTPUT_BUILTIN_BIT = 0;
+    static cosnt int PEDERSEN_BUILTIN_BIT = 1;
+    static cosnt int RANGE_CHECK_BUILTIN_BIT = 2;
+    static cosnt int ECDSA_BUILTIN_BIT = 3;
+    static cosnt int BITWISE_BUILTIN_BIT = 4;
+
+    static const int SELECTED_BUILTINS =
+            (1 << OUTPUT_BUILTIN_BIT) |
+            (1 << PEDERSEN_BUILTIN_BIT) |
+            (1 << RANGE_CHECK_BUILTIN_BIT) |
+            (1 << ECDSA_BUILTIN_BIT);
+
+    static const int BOOTLOADER_PROGRAM_SIZE = 531;
+    static const int N_BUILTINS = 5;
+    static const int N_MAIN_ARGS = N_BUILTINS;
+    static const int N_MAIN_RETURN_VALUES = N_BUILTINS;
 
 }
