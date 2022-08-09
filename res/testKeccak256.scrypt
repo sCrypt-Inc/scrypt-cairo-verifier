@@ -1,0 +1,9 @@
+import "../contracts/keccak256.scrypt";
+
+contract TestKeccak256 {
+
+    public function testHash256(bytes in, bytes res) {
+        require(Keccak256.hash32(in) == res);
+    }
+
+}

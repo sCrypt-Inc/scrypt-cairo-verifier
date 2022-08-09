@@ -34,7 +34,9 @@ struct CairoAuxInput {
     int builtinStopPtr;
     int outputBeginAddr;
     int outputStopAddr;
-    MemoryPage[Config.MAX_PUBLIC_INPUT_MEMORY_PAGES] publicMemory;
+    int z;
+    int alpha;
+    MemoryPage[Config.MAX_PUBLIC_INPUT_MEMORY_PAGES] publicMemoryPages;
 }
 
 struct MemoryPage {
@@ -46,8 +48,7 @@ struct MemoryPage {
 
 struct OutputRegisterPubMainPage {
     int publicMemoryLenght;
-    int memoryHash;
-    int prod;
+    Fact pageFact;
 }
 
 struct GPSVerifierConstructorArgs {
@@ -55,7 +56,52 @@ struct GPSVerifierConstructorArgs {
     int hashedSupportedCairoVerifiers;
 }
 
+struct Fact {
+    int memoryHash;
+    int prod;
+}
+
 library GPSStatementVerifier {
+
+    /*
+      A fact for the claim:
+        I know n pairs (addr, value) for which the hash of the pairs is memoryHash, and the cumulative
+        product: \prod_i( z - (addr_i + alpha * value_i) ) is prod.
+    */
+    function computeFact(
+                int[Config.MAX_PUBLIC_MEMORY_WORDS] publicMemory,
+                int offset,
+                int z,
+                int alpha) : Fact {
+        int prime = PrimeFieldElement.K_MODULUS;
+        int memSize = offset / 2;
+        int prod = 1;
+        int lastIdx = offset - 1;
+
+        bool end = false;
+        loop (Config.MAX_PUBLIC_MEMORY_WORDS) : i {
+            if (i >= memSize) {
+                end = true;
+            }
+            if (!end) {
+                int idx = i * 2;
+                // Compute address + alpha * value
+                int addrValLinearComb = PrimeFieldElement.fadd(
+                                        publicMemory[idx],
+                                        PrimeFieldElement.fmul(
+                                                publicMemory[idx + 1],
+                                                alpha)
+                                        );
+
+                prod = PrimeFieldElement.fmul(prod, z + prime - addrValLinearComb);
+            }
+        }
+
+
+        // TODO: Serialize to bytes and hash keccak256.
+
+
+    }
 
     function registerPublicMemoryMainPage(
             TastMetadata taskMetadata,
@@ -165,9 +211,20 @@ library GPSStatementVerifier {
 
         require(cairoAuxInput.outputStopAddr == outputAddress);
 
-        // TODO: Registring memory page?
+        // Register memory page.
+        require((offset + 1) % 2 == 0); // Size of memory pairs must be even.
+        require(cairoAuxInput.z < PrimeFieldElement.K_MODULUS);
+        require(cairoAuxInput.alpha < PrimeFieldElement.K_MODULUS);
 
-        return { publicMemoryLenght, memoryHash, prod };
+        Fact pageFact = computeFact(publicMemory, 
+                                    offset,
+                                    cairoAuxInput.z,
+                                    cairoAuxInput.alpha);
+
+        // TODO: Do we need to keep a registry?
+        //registry.
+
+        return { publicMemoryLenght, memoryHash, pageFact };
     }
 
 
@@ -181,9 +238,20 @@ library GPSStatementVerifier {
         // We are using verifier layout 1 by default.
         // https://github.com/starkware-libs/starkex-contracts/tree/master/evm-verifier/solidity/contracts/cpu/layout1
 
-        // TODO: register public memory main page
+        // Register public memory main page.
+        OutputRegisterPubMainPage outRegisterPubMainPage = registerPublicMemoryMainPage(
+                                                            taskMetadata,
+                                                            cairoAuxInput,
+                                                            constArgs);
+
+        // Make sure the main page is valid.
+        require(cairoAuxInput.publicMemoryPages[0].size == outRegisterPubMainPage.publicMemoryLenght);
+        require(cairoAuxInput.publicMemoryPages[0].pageHash == outRegisterPubMainPage.pageFact.memoryHash);
+        require(cairoAuxInput.publicMemoryPages[0].pageSize == outRegisterPubMainPage.pageFact.prod);
 
         // TODO: verify proof 
+        int[Config.MM_CONTEXT_SIZE] verifierState = repeat(0, Config.MM_CONTEXT_SIZE);
+        verifierState =
 
     }
             
