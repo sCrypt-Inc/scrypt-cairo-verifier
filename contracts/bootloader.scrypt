@@ -1,7 +1,7 @@
 
 library Bootloader {
 
-    static cont int COMPILED_BOOTLOADER_LEN = 531;
+    static const int COMPILED_BOOTLOADER_LEN = 531;
 
     static const int[COMPILED_BOOTLOADER_LEN] COMPILED_BOOTLOADER = [
             290341444919459839,

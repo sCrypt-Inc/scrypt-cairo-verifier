@@ -1,0 +1,29 @@
+
+library Fri {
+
+    static function validateParams(int[Config.MAX_FRI_STEPS] friSteps, int friStepsLen, int logTraceLength, int logFriLastLayerDegBound) : bool {
+        require(friSteps[0] == 0); // Only eta0 == 0 is currently supported
+
+        int expectedLogDegBound = logFriLastLayerDegBound;
+        bool loopActive = true;
+        loop (Config.MAX_FRI_STEPS) : i {
+            if (i >= friStepsLen) {
+                loopActive = false;
+            }
+            if (loopActive) {
+                int friStep = friSteps[i];
+                require(friStep > 0);
+                require(friStep <= 4);
+                expectedLogDegBound += friStep;
+            }
+        }
+
+        // FRI starts with a polynomial of degree 'traceLength'.
+        // After applying all the FRI steps we expect to get a polynomial of degree less
+        // than friLastLayerDegBound.
+        require(expectedLogDegBound == logTraceLength);
+
+        return true;
+    }
+
+}

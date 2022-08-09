@@ -1,0 +1,17 @@
+import "../contracts/gpsVerifier.scrypt";
+
+contract TestGPSStatementVerifier {
+
+    public function testVerifyProof(
+            ProofParams proofParams,
+            Proof proof,
+            TastMetadata taskMetadata,
+            CairoAuxInput cairoAuxInput,
+            GPSVerifierConstructorArgs constArgs) {
+
+        require(GPSStatementVerifier.verifyProof(
+                    proofParams, proof, taskMetadata, cairoAuxInput, constArgs)
+               );
+    }
+
+}

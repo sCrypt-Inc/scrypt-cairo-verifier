@@ -1,5 +1,7 @@
 import "config.scrypt";
 import "bootloader.scrypt";
+import "fri.scrypt";
+import "primeField.scrypt";
 
 
 struct ProofParams {
@@ -18,6 +20,7 @@ struct Proof {
 
 struct TastMetadata {
     int nTasks;
+    int[Config.MAX_TASKS] nTreePairs;
     int[Config.MAX_TASKS] taskOutputSizes;
     int[Config.MAX_TASKS] programHashes;
 }
@@ -33,7 +36,18 @@ struct CairoAuxInput {
     int builtinStartPtr;
     int builtinStopPtr;
     int outputBeginAddr;
-    int outputStopAddr;
+    int outputStopPtr;
+    int programBeginAddr;
+    int programStopPtr;
+    int initialPc;
+    int finalPc;
+    int logNSteps;
+    int rcMin;
+    int rcMax;
+    int pedersenBeginAddr;
+    int pedersenStopPtr;
+    int rangeCheckBeginAddr;
+    int rangeCheckStopPtr;
     int z;
     int alpha;
     MemoryPage[Config.MAX_PUBLIC_INPUT_MEMORY_PAGES] publicMemoryPages;
@@ -68,7 +82,7 @@ library GPSStatementVerifier {
         I know n pairs (addr, value) for which the hash of the pairs is memoryHash, and the cumulative
         product: \prod_i( z - (addr_i + alpha * value_i) ) is prod.
     */
-    function computeFact(
+    static function computeFact(
                 int[Config.MAX_PUBLIC_MEMORY_WORDS] publicMemory,
                 int offset,
                 int z,
@@ -100,15 +114,15 @@ library GPSStatementVerifier {
 
         // TODO: Serialize to bytes and hash keccak256.
 
-
+        return {0, 0};
     }
 
-    function registerPublicMemoryMainPage(
+    static function registerPublicMemoryMainPage(
             TastMetadata taskMetadata,
-            CairoAuxInput cairoAuxInput
+            CairoAuxInput cairoAuxInput,
             GPSVerifierConstructorArgs constArgs) : OutputRegisterPubMainPage {
 
-        int publicMemoryLenght = Config.BOOTLOADER_PROGRAM_SIZE + 
+        int publicMemoryLenght = Bootloader.COMPILED_BOOTLOADER_LEN + 
                                  // return fp and pc =
                                  2 +
                                  Config.N_MAIN_ARGS +
@@ -118,14 +132,14 @@ library GPSStatementVerifier {
                                  // Number of tasks cell =
                                  1 +
                                  2 *
-                                 taskMetadata.nTasks);
+                                 taskMetadata.nTasks;
 
         int[Config.MAX_PUBLIC_MEMORY_WORDS] publicMemory = repeat(0, Config.MAX_PUBLIC_MEMORY_WORDS);
         int offset = 0;
 
         // Write bootloader program to public memory.
         // TODO: This could be predefined at compile time.
-        loop (Config.COMPILED_BOOTLOADER_LEN) : i {
+        loop (Bootloader.COMPILED_BOOTLOADER_LEN) : i {
             publicMemory[offset] = i + Config.INITIAL_PC;
             publicMemory[offset + 1] = Bootloader.COMPILED_BOOTLOADER[i];
             offset += 2;
@@ -164,11 +178,11 @@ library GPSStatementVerifier {
                 // Set the argument to the builtin start pointer.
                 publicMemory[offset + 1] = cairoAuxInput.builtinStartPtr;
                 // Set the return value to the builtin stop pointer.
-                publicMemory[returnValueOffset + 1] = cairoAuxInput.builtinStopPtr;
+                publicMemory[returnValuesOffset + 1] = cairoAuxInput.builtinStopPtr;
             } else {
                 // Builtin is not present in layout, set the argument value and return value to 0.
                 publicMemory[offset + 1] = 0;
-                publicMemory[returnValueOffset + 1] = 0;
+                publicMemory[returnValuesOffset + 1] = 0;
             }
             offset += 2;
         }
@@ -209,7 +223,7 @@ library GPSStatementVerifier {
             }
         }
 
-        require(cairoAuxInput.outputStopAddr == outputAddress);
+        require(cairoAuxInput.outputStopPtr == outputAddress);
 
         // Register memory page.
         require((offset + 1) % 2 == 0); // Size of memory pairs must be even.
@@ -224,11 +238,130 @@ library GPSStatementVerifier {
         // TODO: Do we need to keep a registry?
         //registry.
 
-        return { publicMemoryLenght, memoryHash, pageFact };
+        return { publicMemoryLenght, pageFact };
     }
 
+    static function initVerifierParams(CairoAuxInput cairoAuxInput, ProofParams proofParams) : int[Config.MM_CONTEXT_SIZE] {
+        int[Config.MM_CONTEXT_SIZE] verifierState = repeat(0, Config.MM_CONTEXT_SIZE);
+        
+        require(proofParams.logBlowupFactor <= 16 && proofParams.logBlowupFactor >= 1);
+        require(proofParams.powBits <= 50 && proofParams.powBits >= Config.MIN_PROOF_OF_WORK_BITS);
+        require(proofParams.powBits < Config.NUM_SECURITY_BITS);
 
-    function verifyProof(
+        require(proofParams.friLastLayerDegBound < 10);
+
+        require(proofParams.nFriSteps <= 10 && proofParams.nFriSteps > 1);
+
+        //// AIR specific init.
+        // Context of generated code.
+        verifierState[Config.MM_OFFSET_SIZE] = PrimeFieldElement.fpow(2, 16);
+        verifierState[Config.MM_HALF_OFFSET_SIZE] = PrimeFieldElement.fpow(2, 15);
+
+        // Number of steps.
+        require(cairoAuxInput.logNSteps < 50);
+        verifierState[Config.MM_LOG_N_STEPS] = cairoAuxInput.logNSteps;
+        int logTraceLength = cairoAuxInput.logNSteps + Config.LOG_CPU_COMPONENT_HEIGHT;
+        
+        // Range check limits.
+        verifierState[Config.MM_RC_MIN] = cairoAuxInput.rcMin;
+        verifierState[Config.MM_RC_MIN] = cairoAuxInput.rcMax;
+        require(cairoAuxInput.rcMin <= cairoAuxInput.rcMax);
+        require(cairoAuxInput.rcMax <= Config.MM_OFFSET_SIZE);
+
+        // Initial and final pc. ("program" memory segment)
+        require(cairoAuxInput.programBeginAddr == cairoAuxInput.initialPc);
+        require(cairoAuxInput.programStopPtr == cairoAuxInput.finalPc);
+        verifierState[Config.MM_INITAL_PC] = cairoAuxInput.programBeginAddr;
+        verifierState[Config.MM_FINAL_PC] = cairoAuxInput.programStopPtr;
+
+        // Initial and final ap. ("execution" memory segment)
+        verifierState[Config.MM_INITAL_AP] = cairoAuxInput.executionBeginAddr;
+        verifierState[Config.MM_FINAL_AP] = cairoAuxInput.executionStopPtr;
+
+        // "output" memory segment.
+        require(cairoAuxInput.outputBeginAddr <= cairoAuxInput.outputStopPtr);
+        int bit64 = PrimeFieldElement.fpow(2, 64);
+        require(cairoAuxInput.outputStopPtr < bit64);
+
+        // "Pedersen" memory segment.
+        verifierState[Config.MM_INITAL_PEDERSEN_ADDR] = cairoAuxInput.pedersenBeginAddr;
+        require(cairoAuxInput.pedersenBeginAddr < bit64);
+        int pedersenMaxStopPtr = cairoAuxInput.pedersenBeginAddr + 3 *
+                                        (PrimeFieldElement.fpow(2, cairoAuxInput.logNSteps) / Config.PEDERSEN_BUILTIN_RATIO);
+        require(cairoAuxInput.pedersenBeginAddr <= cairoAuxInput.pedersenStopPtr);
+        require(cairoAuxInput.pedersenStopPtr <= pedersenMaxStopPtr);
+
+        // "range_check" memory segment.
+        verifierState[Config.MM_INITIAL_RC_ADDR] = cairoAuxInput.rangeCheckBeginAddr;
+        require(cairoAuxInput.rangeCheckBeginAddr < bit64);
+        int rcMaxStopPtr = cairoAuxInput.rangeCheckBeginAddr + 
+                            (PrimeFieldElement.fpow(2, cairoAuxInput.logNSteps) / Config.RC_BUILTIN_RATIO);
+        require(cairoAuxInput.rangeCheckBeginAddr <= cairoAuxInput.rangeCheckStopPtr);
+        require(cairoAuxInput.rangeCheckStopPtr <= rcMaxStopPtr);
+
+        // "ecdsa" memory segment.
+        verifierState[Config.MM_INITIAL_ECDSA_ADDR] = cairoAuxInput.ecdsaBeginAddr;
+        require(cairoAuxInput.ecdsaBeginAddr < bit64);
+        int ecdsaMaxStopPtr = cairoAuxInput.ecdsaBeginAddr + 
+                            (PrimeFieldElement.fpow(2, cairoAuxInput.logNSteps) / Config.ECDSA_BUILTIN_RATIO);
+        require(cairoAuxInput.ecdsaBeginAddr <= cairoAuxInput.ecdsaStopPtr);
+        require(cairoAuxInput.ecdsaStopPtr <= ecdsaMaxStopPtr);
+
+        // Public memory.
+        require(cairoAuxInput.nPublicMemoryPages >= 1);
+        require(cairoAuxInput.nPublicMemoryPages <= Config.MAX_PUBLIC_INPUT_MEMORY_PAGES);
+        //verifierState[Config.MM_N_PUBLIC_MEM_PAGES] = cairoAuxInput.nPublicMemoryPages;
+
+        // Compute the total number of public memory entries.
+        int nPublicMemoryEntries = 0;
+        bool loopActive = true;
+        loop (Config.MAX_PUBLIC_INPUT_MEMORY_PAGES) : i {
+            if (i >= cairoAuxInput.nPublicMemoryPages) {
+                loopActive = false;
+            }
+
+            if (loopActive) {
+               MemoryPage page = cairoAuxInput.publicMemoryPages[i];
+               require(page.pageSize < PrimeFieldElement.fpow(2, 30));
+               nPublicMemoryEntries += page.pageSize;
+            }
+        }
+        verifierState[Config.MM_N_PUBLIC_MEM_PAGES] = nPublicMemoryEntries;
+
+        // TODO: public input length check
+
+        // Set public input pointer to point at the first word of the public input.
+        verifierState[Config.MM_PUBLIC_INPUT_PTR] = Config.MM_CONTEXT_SIZE;
+        loopActive = true;
+        loop (Config.MAX_PUBLIC_INPUT_MEMORY_PAGES) : i {
+            if (i >= cairoAuxInput.nPublicMemoryPages) {
+                loopActive = false;
+            }
+            
+            if (loopActive) {
+                verifierState[i + 6] = cairoAuxInput.publicMemoryPages[i].pageHash; // TODO: what to push here?
+            }
+        }
+
+        // Pedersen shift point values.
+        verifierState[Config.MM_PEDERSEN_SHIFT_POINT_X] = 0x49ee3eba8c1600700ee1b87eb599f16716b0b1022947733551fde4050ca6804;
+        verifierState[Config.MM_PEDERSEN_SHIFT_POINT_Y] = 0x3ca0cfe4b3bc6ddf346d49d06ea0ed34e621062c0e056c1d0405d266e10268a;
+
+        verifierState[Config.MM_RC16_PERM_PUBLIC_MEMORY_PROD] = 1;
+        verifierState[Config.MM_ECDSA_SIG_CONFIG_ALPHA] = 1;
+        verifierState[Config.MM_ECDSA_SIG_CONFIG_BETA] = 0x6f21413efbe40de150e596d72f7a8c5609ad26c15c915c1f4cdfcb99cee9e89;
+        verifierState[Config.MM_ECDSA_SIG_CONFIG_SHIFT_POINT_X] = 0x49ee3eba8c1600700ee1b87eb599f16716b0b1022947733551fde4050ca6804;
+        verifierState[Config.MM_ECDSA_SIG_CONFIG_SHIFT_POINT_Y] = 0x3ca0cfe4b3bc6ddf346d49d06ea0ed34e621062c0e056c1d0405d266e10268a;
+
+        //// end - AIR specific init
+
+        Fri.validateParams(proofParams.friSteps, proofParams.nFriSteps, logTraceLength, proofParams.friLastLayerDegBound);
+
+
+        return verifierState;
+    }
+
+    static function verifyProof(
             ProofParams proofParams,
             Proof proof,
             TastMetadata taskMetadata,
@@ -245,14 +378,15 @@ library GPSStatementVerifier {
                                                             constArgs);
 
         // Make sure the main page is valid.
-        require(cairoAuxInput.publicMemoryPages[0].size == outRegisterPubMainPage.publicMemoryLenght);
+        require(cairoAuxInput.publicMemoryPages[0].pageSize == outRegisterPubMainPage.publicMemoryLenght);
         require(cairoAuxInput.publicMemoryPages[0].pageHash == outRegisterPubMainPage.pageFact.memoryHash);
         require(cairoAuxInput.publicMemoryPages[0].pageSize == outRegisterPubMainPage.pageFact.prod);
 
         // TODO: verify proof 
-        int[Config.MM_CONTEXT_SIZE] verifierState = repeat(0, Config.MM_CONTEXT_SIZE);
-        verifierState =
+        int[Config.MM_CONTEXT_SIZE] verifierState = initVerifierParams(cairoAuxInput, proofParams);
 
+    
+        return false;
     }
             
 
