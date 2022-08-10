@@ -1,0 +1,34 @@
+import "config.scrypt";
+
+
+library VerifierChannel {
+
+    static function initChannel(
+                        int proofOffset,
+                        int publicInputHash,
+                        int[Config.MM_CONTEXT_SIZE] verifierState) : int[Config.MM_CONTEXT_SIZE] {
+
+        verifierState[Config.MM_CHANNEL] = proofOffset;
+        
+
+        // Init PRNG (randomness derived from public input).
+        verifierState[Config.MM_CHANNEL + 1] = publicInputHash;
+        verifierState[Config.MM_CHANNEL + 2] = 0;
+
+        return verifierState;
+    }
+
+    static function sendFieldElements(
+                        int[Config.MM_CONTEXT_SIZE] verifierState) : int[Config.MM_CONTEXT_SIZE] {
+
+        bytes mask = repeat(b'00', 32);
+
+        loop (Config.N_INTERACTION_ELEMENTS) : i {
+
+
+        }
+
+    }
+
+
+}

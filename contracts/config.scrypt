@@ -9,9 +9,10 @@ library Config {
     static const int MIN_PROOF_OF_WORK_BITS = 0;
     static const int NUM_SECURITY_BITS = 80;
     static const int MAX_TASKS = 6; // TODO
+    static const int MAX_N_QUERIES = 48;
 
     // Memory layout.
-    static const int MM_CONTEXT_SIZE = 2135;
+    static const int MM_CONTEXT_SIZE = 2883;
     static const int MM_N_PUBLIC_MEM_PAGES = 2134;
     static const int MM_OFFSET_SIZE = 322;
     static const int MM_HALF_OFFSET_SIZE = 323;
@@ -33,7 +34,21 @@ library Config {
     static const int MM_ECDSA_SIG_CONFIG_SHIFT_POINT_Y = 341;
     static const int MM_ECDSA_SIG_CONFIG_BETA = 342;
     static const int MM_RC16_PERM_PUBLIC_MEMORY_PROD = 332;
+    static const int MM_FRI_STEPS_PTR = 294;
+    static const int MM_FRI_LAST_LAYER_DEG_BOUND = 316;
+    static const int MM_TRACE_LENGTH = 321;
+    static const int MM_BLOW_UP_FACTOR = 1;
+    static const int MM_PROOF_OF_WORK_BITS = 3;
+    static const int MM_N_UNIQUE_QUERIES = 9;
+    static const int MM_LOG_EVAL_DOMAIN_SIZE = 2;
+    static const int MM_EVAL_DOMAIN_SIZE = 0;
+    static const int MM_EVAL_DOMAIN_GENERATOR = 4;
+    static const int MM_TRACE_GENERATOR = 344;
+    static const int MM_CHANNEL = 10;
+    static const int MM_TRACE_COMMITMENT = 6;
+    static const int MM_INTERACTION_ELEMENTS = 346;
 
+    static const int N_INTERACTION_ELEMENTS = 3;
 
     static const int PEDERSEN_BUILTIN_RATIO = 8;
     static const int PEDERSEN_BUILTIN_REPETITIONS = 4;
