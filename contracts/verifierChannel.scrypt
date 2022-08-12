@@ -1,33 +1,118 @@
 import "config.scrypt";
 
 
+struct VCReadOut {
+    int val;
+    bytes verifierState;
+}
+
+
 library VerifierChannel {
 
     static function initChannel(
+                        int channelIdx,
                         int proofOffset,
                         int publicInputHash,
-                        int[Config.MM_CONTEXT_SIZE] verifierState) : int[Config.MM_CONTEXT_SIZE] {
+                        bytes verifierState) : bytes {
 
-        verifierState[Config.MM_CHANNEL] = proofOffset;
-        
+        verifierState = Utils.writeValUInt256(channelIdx, proofOffset, verifierState);
 
         // Init PRNG (randomness derived from public input).
-        verifierState[Config.MM_CHANNEL + 1] = publicInputHash;
-        verifierState[Config.MM_CHANNEL + 2] = 0;
+        verifierState = Utils.writeValUInt256(channelIdx + 1, publicInputHash, verifierState);
+        verifierState = Utils.writeValUInt256(channelIdx + 2, 0, verifierState);
 
         return verifierState;
     }
 
-    static function sendFieldElements(
-                        int[Config.MM_CONTEXT_SIZE] verifierState) : int[Config.MM_CONTEXT_SIZE] {
+    static function readBytes(
+                        int channelIdx,
+                        bool mix,
+                        bytes verifierState) : VCReadOut {
 
-        bytes mask = repeat(b'00', 32);
+        int proofIdx = Utils.readValUInt256(channelIdx, verifierState);
+        int val = Utils.readValUInt256(proofIdx, verifierState);
+        verifierState = Utils.writeValUInt256(channelIdx, proofIdx + 1, verifierState);
+        
+        if (mix) {
+            int digestIdx = channelIdx + 1;
+            int counterIdx = channelIdx + 2;
+            
+            verifierState = Utils.writeValUInt256(counterIdx, val, verifierState);
 
-        loop (Config.N_INTERACTION_ELEMENTS) : i {
-
-
+            // TODO: Byte order matters here. (Also the sign bit)
+            bytes bytes1 = num2bin(Utils.readValUInt256(digestIdx, verifierState), 32); .
+            bytes bytes2 = num2bin(val, 32);
+            verifierState = Utils.writeValUInt256(digestIdx, unpack(sha256(bytes1 + bytes2)), verifierState);
+            verifierState = Utils.writeValUInt256(counterIdx, 0, verifierState);
         }
 
+        return {val ,verifierState};
+    }
+
+    static function readHash(
+                        int channelIdx,
+                        bool mix,
+                        bytes verifierState) : VCReadOut {
+        return readBytes(channelIdx, mix, verifierState); 
+    }
+
+    static function sendFieldElements(
+                        int channelIdx,
+                        int nElements,
+                        int targetIdxInput,
+                        bytes verifierState) : bytes {
+
+        require(nElements < 500); // TODO
+
+        int digestIdx = channelIdx + 1;
+        int counterIdx = channelIdx + 2;
+        int targetIdx = targetIdxInput;
+
+        bytes mask = b'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+
+        // OUTER : 500
+        //     INNER: 20
+
+        bool outerLoopActive = true;
+        bool innerLoopActive = true;
+
+        loop (500) : i {
+            if (endIdx >= targetIdx) {
+                outerLoopActive = false;
+            }
+
+            if (outerLoopActive) {
+                int fieldElement = PrimeFieldElement.K_MODULUS;
+
+                loop (20) : i {
+                    if (fieldElement < PrimeFieldElement.K_MODULUS) {
+                        innerLoopActive = false; 
+                    }
+
+                    if (innerLoopActive) {
+                        bytes digestBytes = num2bin(Utils.readValUInt256(digestIdx, verifierState), 32); .
+                        bytes counterBytes = num2bin(Utils.readValUInt256(digestIdx + 1, verifierState), 32); .
+
+                        int fieldElement = unpack(sha256(digestBytes + counterBytes));
+                        verifierState = Utils.writeValUInt256(counterIdx, 1, verifierState);
+                    }
+                }
+
+                verifierState = Utils.writeValUInt256(targetIdx, PrimeFieldElement.fromMontgomery(fieldElement), verifierState);
+
+                targetIdx += 1;
+            }
+        }
+
+        return verifierState;
+    }
+
+    static function readFieldElements(
+                        int channelIdx,
+                        bool mix,
+                        bytes verifierState) : int {
+        VCReadOut out = readBytes(channelIdx, mix, verifierState);
+        return {PrimeFieldElement.fromMontgomery(out.val), out.verifierState};
     }
 
 

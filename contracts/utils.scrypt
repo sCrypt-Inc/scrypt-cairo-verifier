@@ -1,0 +1,20 @@
+
+library Utils {
+    
+    static function writeValUInt256(int idx, int val, bytes b) : bytes {
+        return b[:idx*4] + num2bin(val, 4) + b[idx*4+4:];
+    }
+
+    static function readValUInt256(int idx, bytes b) : int {
+        return unpack(b[idx*4:idx*4+4]);
+    }
+
+    static function appendValUInt256(int val, bytes b) : bytes {
+        return b + num2bin(val, 4);
+    }
+
+    static function getVecValUInt256Len(bytes b) : int {
+        return len(b) / 4;
+    }
+
+}

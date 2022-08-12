@@ -2,6 +2,9 @@ import "config.scrypt";
 import "bootloader.scrypt";
 import "fri.scrypt";
 import "primeField.scrypt";
+import "utils.scrypt";
+import "pedersenHash.scrypt";
+import "ecdsa.scrypt";
 
 
 // TODO: Try to reduce writes to verifier state. 
@@ -34,7 +37,6 @@ struct CairoAuxInput {
     int ecdsaStopPtr;
     int publicMemoryPaddingAddr;
     int publicMemoryPaddingValue;
-    int nPublicMemoryPages;
     int executionBeginAddr;
     int executionStopPtr;
     int builtinStartPtr;
@@ -54,6 +56,7 @@ struct CairoAuxInput {
     int rangeCheckStopPtr;
     int z;
     int alpha;
+    int nPublicMemoryPages;
     MemoryPage[Config.MAX_PUBLIC_INPUT_MEMORY_PAGES] publicMemoryPages;
 }
 
@@ -245,42 +248,40 @@ library GPSStatementVerifier {
         return { publicMemoryLenght, pageFact };
     }
 
-    static function initVerifierParams(CairoAuxInput cairoAuxInput, ProofParams proofParams) : int[Config.MM_CONTEXT_SIZE] {
-        int[Config.MM_CONTEXT_SIZE] verifierState = repeat(0, Config.MM_CONTEXT_SIZE);
+    static function initVerifierParams(CairoAuxInput cairoAuxInput, ProofParams proofParams) : bytes {
+        bytes verifierState = Config.VERIFIER_STATE_INITAL_CONFIG;
         
         require(proofParams.logBlowupFactor <= 16 && proofParams.logBlowupFactor >= 1);
         require(proofParams.powBits <= 50 && proofParams.powBits >= Config.MIN_PROOF_OF_WORK_BITS);
         require(proofParams.powBits < Config.NUM_SECURITY_BITS);
-
         require(proofParams.friLastLayerDegBound < 10);
-
         require(proofParams.nFriSteps <= 10 && proofParams.nFriSteps > 1);
 
         //// AIR specific init.
         // Context of generated code.
-        verifierState[Config.MM_OFFSET_SIZE] = PrimeFieldElement.fpow(2, 16);
-        verifierState[Config.MM_HALF_OFFSET_SIZE] = PrimeFieldElement.fpow(2, 15);
+        verifierState = Utils.writeValUInt256(Config.MM_OFFSET_SIZE, PrimeFieldElement.fpow(2, 16), verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_HALF_OFFSET_SIZE, PrimeFieldElement.fpow(2, 15), verifierState);
 
         // Number of steps.
         require(cairoAuxInput.logNSteps < 50);
-        verifierState[Config.MM_LOG_N_STEPS] = cairoAuxInput.logNSteps;
+        verifierState = Utils.writeValUInt256(Config.MM_LOG_N_STEPS, cairoAuxInput.logNSteps, verifierState);
         int logTraceLength = cairoAuxInput.logNSteps + Config.LOG_CPU_COMPONENT_HEIGHT;
         
         // Range check limits.
-        verifierState[Config.MM_RC_MIN] = cairoAuxInput.rcMin;
-        verifierState[Config.MM_RC_MIN] = cairoAuxInput.rcMax;
+        verifierState = Utils.writeValUInt256(Config.MM_RC_MIN, cairoAuxInput.rcMin, verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_RC_MAX, cairoAuxInput.rcMax, verifierState);
         require(cairoAuxInput.rcMin <= cairoAuxInput.rcMax);
         require(cairoAuxInput.rcMax <= Config.MM_OFFSET_SIZE);
 
         // Initial and final pc. ("program" memory segment)
         require(cairoAuxInput.programBeginAddr == cairoAuxInput.initialPc);
         require(cairoAuxInput.programStopPtr == cairoAuxInput.finalPc);
-        verifierState[Config.MM_INITAL_PC] = cairoAuxInput.programBeginAddr;
-        verifierState[Config.MM_FINAL_PC] = cairoAuxInput.programStopPtr;
+        verifierState = Utils.writeValUInt256(Config.MM_INITAL_PC, cairoAuxInput.programBeginAddr, verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_FINAL_PC, cairoAuxInput.programStopPtr, verifierState);
 
         // Initial and final ap. ("execution" memory segment)
-        verifierState[Config.MM_INITAL_AP] = cairoAuxInput.executionBeginAddr;
-        verifierState[Config.MM_FINAL_AP] = cairoAuxInput.executionStopPtr;
+        verifierState = Utils.writeValUInt256(Config.MM_INITAL_AP, cairoAuxInput.executionBeginAddr, verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_FINAL_AP, cairoAuxInput.executionStopPtr, verifierState);
 
         // "output" memory segment.
         require(cairoAuxInput.outputBeginAddr <= cairoAuxInput.outputStopPtr);
@@ -288,7 +289,7 @@ library GPSStatementVerifier {
         require(cairoAuxInput.outputStopPtr < bit64);
 
         // "Pedersen" memory segment.
-        verifierState[Config.MM_INITAL_PEDERSEN_ADDR] = cairoAuxInput.pedersenBeginAddr;
+        verifierState = Utils.writeValUInt256(Config.MM_INITAL_PEDERSEN_ADDR, cairoAuxInput.pedersenBeginAddr, verifierState);
         require(cairoAuxInput.pedersenBeginAddr < bit64);
         int pedersenMaxStopPtr = cairoAuxInput.pedersenBeginAddr + 3 *
                                         (PrimeFieldElement.fpow(2, cairoAuxInput.logNSteps) / Config.PEDERSEN_BUILTIN_RATIO);
@@ -296,7 +297,7 @@ library GPSStatementVerifier {
         require(cairoAuxInput.pedersenStopPtr <= pedersenMaxStopPtr);
 
         // "range_check" memory segment.
-        verifierState[Config.MM_INITIAL_RC_ADDR] = cairoAuxInput.rangeCheckBeginAddr;
+        verifierState = Utils.writeValUInt256(Config.MM_INITIAL_RC_ADDR, cairoAuxInput.rangeCheckBeginAddr, verifierState);
         require(cairoAuxInput.rangeCheckBeginAddr < bit64);
         int rcMaxStopPtr = cairoAuxInput.rangeCheckBeginAddr + 
                             (PrimeFieldElement.fpow(2, cairoAuxInput.logNSteps) / Config.RC_BUILTIN_RATIO);
@@ -304,7 +305,7 @@ library GPSStatementVerifier {
         require(cairoAuxInput.rangeCheckStopPtr <= rcMaxStopPtr);
 
         // "ecdsa" memory segment.
-        verifierState[Config.MM_INITIAL_ECDSA_ADDR] = cairoAuxInput.ecdsaBeginAddr;
+        verifierState = Utils.writeValUInt256(Config.MM_INITIAL_ECDSA_ADDR, cairoAuxInput.ecdsaBeginAddr, verifierState);
         require(cairoAuxInput.ecdsaBeginAddr < bit64);
         int ecdsaMaxStopPtr = cairoAuxInput.ecdsaBeginAddr + 
                             (PrimeFieldElement.fpow(2, cairoAuxInput.logNSteps) / Config.ECDSA_BUILTIN_RATIO);
@@ -314,7 +315,7 @@ library GPSStatementVerifier {
         // Public memory.
         require(cairoAuxInput.nPublicMemoryPages >= 1);
         require(cairoAuxInput.nPublicMemoryPages <= Config.MAX_PUBLIC_INPUT_MEMORY_PAGES);
-        //verifierState[Config.MM_N_PUBLIC_MEM_PAGES] = cairoAuxInput.nPublicMemoryPages;
+        //verifierState = Utils.writeValUInt256(Config.MM_N_PUBLIC_MEM_PAGES, cairoAuxInput.nPublicMemoryPages, verifierState);
 
         // Compute the total number of public memory entries.
         int nPublicMemoryEntries = 0;
@@ -330,12 +331,11 @@ library GPSStatementVerifier {
                nPublicMemoryEntries += page.pageSize;
             }
         }
-        verifierState[Config.MM_N_PUBLIC_MEM_PAGES] = nPublicMemoryEntries;
-
-        // TODO: public input length check
+        verifierState = Utils.writeValUInt256(Config.MM_N_PUBLIC_MEM_PAGES, nPublicMemoryEntries, verifierState);
+        require(cairoAuxInput.nPublicMemoryPages == 4 * nPublicMemoryEntries - 1); // TODO
 
         // Set public input pointer to point at the first word of the public input.
-        verifierState[Config.MM_PUBLIC_INPUT_PTR] = Config.MM_CONTEXT_SIZE;
+        verifierState = Utils.writeValUInt256(Config.MM_PUBLIC_INPUT_PTR, Config.MM_CONTEXT_SIZE, verifierState);
         loopActive = true;
         loop (Config.MAX_PUBLIC_INPUT_MEMORY_PAGES) : i {
             if (i >= cairoAuxInput.nPublicMemoryPages) {
@@ -348,30 +348,34 @@ library GPSStatementVerifier {
         }
 
         // Pedersen shift point values.
-        verifierState[Config.MM_PEDERSEN_SHIFT_POINT_X] = 0x49ee3eba8c1600700ee1b87eb599f16716b0b1022947733551fde4050ca6804;
-        verifierState[Config.MM_PEDERSEN_SHIFT_POINT_Y] = 0x3ca0cfe4b3bc6ddf346d49d06ea0ed34e621062c0e056c1d0405d266e10268a;
+        verifierState = Utils.writeValUInt256(Config.MM_PEDERSEN_SHIFT_POINT_X, 
+                            0x49ee3eba8c1600700ee1b87eb599f16716b0b1022947733551fde4050ca6804, verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_PEDERSEN_SHIFT_POINT_Y, 
+                            0x3ca0cfe4b3bc6ddf346d49d06ea0ed34e621062c0e056c1d0405d266e10268a, verifierState);
 
-        verifierState[Config.MM_RC16_PERM_PUBLIC_MEMORY_PROD] = 1;
-        verifierState[Config.MM_ECDSA_SIG_CONFIG_ALPHA] = 1;
-        verifierState[Config.MM_ECDSA_SIG_CONFIG_BETA] = 0x6f21413efbe40de150e596d72f7a8c5609ad26c15c915c1f4cdfcb99cee9e89;
-        verifierState[Config.MM_ECDSA_SIG_CONFIG_SHIFT_POINT_X] = 0x49ee3eba8c1600700ee1b87eb599f16716b0b1022947733551fde4050ca6804;
-        verifierState[Config.MM_ECDSA_SIG_CONFIG_SHIFT_POINT_Y] = 0x3ca0cfe4b3bc6ddf346d49d06ea0ed34e621062c0e056c1d0405d266e10268a;
+        verifierState = Utils.writeValUInt256(Config.MM_RC16_PERM_PUBLIC_MEMORY_PROD, 1, verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_ECDSA_SIG_CONFIG_ALPHA, 1, verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_ECDSA_SIG_CONFIG_BETA, 
+                            0x6f21413efbe40de150e596d72f7a8c5609ad26c15c915c1f4cdfcb99cee9e89, verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_ECDSA_SIG_CONFIG_SHIFT_POINT_X, 
+                            0x49ee3eba8c1600700ee1b87eb599f16716b0b1022947733551fde4050ca6804, verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_ECDSA_SIG_CONFIG_SHIFT_POINT_Y, 
+                            0x3ca0cfe4b3bc6ddf346d49d06ea0ed34e621062c0e056c1d0405d266e10268a, verifierState);
 
         //// end - AIR specific init
 
         Fri.validateParams(proofParams.friSteps, proofParams.nFriSteps, logTraceLength, proofParams.friLastLayerDegBound);
 
         // Storing the fri steps at the end of the verifier context / state.
-        int FRI_SEGMENT_START = 2386; // TODO: Pointer to the start of fri steps segment. This should be dynamic, check reference impl.
-        verifierState[Confing.MM_FRI_STEPS_PTR] = FRI_SEGMENT_START; 
-        verifierState[FRI_SEGMENT_START] = proofParams.nFriSteps;
+        verifierState = Utils.writeValUInt256(Config.MM_FRI_STEPS_PTR, Utils.getVecValUInt256Len(verifierState), verifierState);
+        verifierState = Utils.appendValUInt256(proofParams.nFriSteps, verifierState);
         loopActive = true;
         loop (MAX_FRI_STEPS) : i {
             if (i > proofParams.nFriSteps) {
                 loopActive = false;
             }
             if (loopActive) {
-                verifierState[FRI_SEGMENT_START + i + 1] = proofParams.friSteps[i];
+                verifierState = Utils.appendValUInt256(proofParams.friSteps[i], verifierState);
             }
         }
 
@@ -379,23 +383,70 @@ library GPSStatementVerifier {
         require(proofParams.nQueries <= Config.MAX_N_QUERIES;
         require(proofParams.nQueries * logBlowupFactor + powBits >= Config.NUM_SECURITY_BITS);
 
-        verifierState[Config.MM_FRI_LAST_LAYER_DEG_BOUND] = PrimeFieldElement.fpow(2, proofParams.friLastLayerDegBound);
-        verifierState[Config.MM_TRACE_LENGTH] = PrimeFieldElement.fpow(2, logTraceLength);
-        verifierState[Config.MM_BLOW_UP_FACTOR] = PrimeFieldElement.fpow(2, logBlowupFactor);
-        verifierState[Config.MM_PROOF_OF_WORK_BITS] = powBits;
-        verifierState[Config.MM_N_UNIQUE_QUERIES] = proofParams.nQueries;
-        verifierState[Config.MM_LOG_EVAL_DOMAIN_SIZE] = logTraceLength + logBlowupFactor;
-        verifierState[Config.MM_EVAL_DOMAIN_SIZE] = PrimeFieldElement.fpow(2, verifierState[Config.MM_LOG_EVAL_DOMAIN_SIZE);
-        verifierState[Config.MM_EVAL_DOMAIN_GENERATOR] = PrimeFieldElement.fpow(
+        verifierState = Utils.writeValUInt256(Config.MM_FRI_LAST_LAYER_DEG_BOUND, 
+                                PrimeFieldElement.fpow(2, proofParams.friLastLayerDegBound), verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_TRACE_LENGTH, 
+                                PrimeFieldElement.fpow(2, logTraceLength), verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_BLOW_UP_FACTOR, 
+                                PrimeFieldElement.fpow(2, logBlowupFactor), verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_PROOF_OF_WORK_BITS, 
+                                powBits, verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_N_UNIQUE_QUERIES, 
+                                proofParams.nQueries, verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_LOG_EVAL_DOMAIN_SIZE, 
+                                logTraceLength + logBlowupFactor, verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_EVAL_DOMAIN_SIZE, 
+                                PrimeFieldElement.fpow(2, verifierState[Config.MM_LOG_EVAL_DOMAIN_SIZE), verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_EVAL_DOMAIN_GENERATOR, 
+                                PrimeFieldElement.fpow(
                                     PrimeFieldElement.GENERATOR_VAL,
                                     (PrimeFieldElement.K_MODULUS - 1) / verifierState[Config.MM_EVAL_DOMAIN_SIZE]
-                            );
-        verifierState[Config.MM_TRACE_GENERATOR] = PrimeFieldElement.fpow(
+                                ), verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_TRACE_GENERATOR, 
+                                PrimeFieldElement.fpow(
                                     verifierState[Config.MM_EVAL_DOMAIN_GENERATOR],
                                     verifierState[Config.MM_BLOW_UP_FACTOR]
-                            );
+                                ), verifierState);
 
         return verifierState;
+    }
+
+    static function oods_consistency_check(bytes verifierState) : bytes {
+        int oodsPoints = Utils.readValUInt256(Config.MM_OODS_POINT, verifierState);
+
+        int nPedersenHashCopies = PrimeFieldElement.fpow(2, Config.MM_LOG_N_STEPS) /
+                                  Config.PEDERSEN_BUILTIN_RATIO * Config.PEDERSEN_BUILTIN_REPETITIONS;
+
+        int zPointPowPedersen = PrimeFieldElement.fpow(oodsPoints, nPedersenHashCopies);
+
+        verifierState = Utils.writeValUInt256(Config.MM_PERIODIC_COLUMN_PEDERSEN_POINTS_X,
+                                    PedersenHash.computeX(zPointPowPedersen), verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_PERIODIC_COLUMN_PEDERSEN_POINTS_Y,
+                                    PedersenHash.computeY(zPointPowPedersen), verifierState);
+
+        // The number of copies in the ECDSA signature periodic columns is
+        // nSteps / ECDSA_BUILTIN_RATIO / ECDSA_BUILTIN_REPETITIONS
+        int nEcdsaSignatureCopy = PrimeFieldElement.fpow(2, Config.MM_LOG_N_STEPS) /
+                                  Config.ECDSA_BUILTIN_RATIO * Config.ECDSA_BUILTIN_REPETITIONS;
+
+        int zPointPowEcdsa = PrimeFieldElement.fpow(oodsPoints, nEcdsaSignatureCopy);
+
+        verifierState = Utils.writeValUInt256(Config.MM_PERIODIC_COLUMN_ECDSA_GENERATOR_POINTS_X,
+                                    EcdsaPoints.computeXColumn(zPointPowEcdsa), verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_PERIODIC_COLUMN_ECDSA_GENERATOR_POINTS_Y,
+                                    EcdsaPoints.computeYColumn(zPointPowEcdsa), verifierState);
+
+        verifierState = Utils.writeValUInt256(Config.MM_MEMORY_MULTI_COLUMN_PERM_PERM_INTERACTION_ELM,
+                                    Utils.readValUInt256(Config.MM_INTERACTION_ELEMENTS, verifierState,
+                                    verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_MEMORY_MULTI_COLUMN_PERM_HASH_INTERACTION_ELM0,
+                                    Utils.readValUInt256(Config.MM_INTERACTION_ELEMENTS + 1, verifierState),
+                                    verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_RC16_PERM_INTERACTION_ELM,
+                                    Utils.readValUInt256(Config.MM_INTERACTION_ELEMENTS + 2, verifierState),
+                                    verifierState);
+
+        //verifierState = Utils.writeValUInt256(Config.MM_MEMORY_MULTI_COLUMN_PERM_PERM_PUBLIC_MEMORY_PROD,
     }
 
     static function verifyProof(
@@ -420,42 +471,57 @@ library GPSStatementVerifier {
         require(cairoAuxInput.publicMemoryPages[0].pageSize == outRegisterPubMainPage.pageFact.prod);
 
         // Verify proof 
-        int[Config.MM_CONTEXT_SIZE] verifierState = initVerifierParams(cairoAuxInput, proofParams);
+        bytes verifierState = initVerifierParams(cairoAuxInput, proofParams);
 
         // Store the proof at the end of the verifier state and store a pointer there.
-        int PROOF_SEGMENT_START = 2394; // TODO
-        int proofIdx = PROOF_SEGMENT_START;
+        int proofIdx = Utils.getVecValUInt256Len(verifierState);
         bool loopActive = true;
         loop (Config.MAX_PROOF_SIZE) : i {
             if (i > proof.proofSize) {
                 loopActive = false;
             }
             if (loopActive) {
-                verifierState[PROOF_SEGMENT_START + i + 1] = proof.vals[i];
+                verifierState = Utils.appendValUInt256(proof.vals[i], verifierState);
             }
         }
 
         // Init the channel.
-        verifierState = VerifierChannel.initChannel(proofIdx, cairoAuxInput.publicInputHash, verifierState);
+        int channelIdx = Config.MM_CHANNEL;
+        verifierState = VerifierChannel.initChannel(channelIdx, proofIdx, cairoAuxInput.publicInputHash, verifierState);
 
         // Read trace commitment.
-        int proofIdx = verifierState[Config.MM_CHANNEL];
-        int val = verifierState[proofIdx];
-        verifierState[Config.MM_CHANNEL] = proofIdx + 1;
-
-        verifierState[Config.MM_CHANNEL + 2] = val;
-        bytes bytes1 = num2bin(verifierState[Config.MM_CHANNEL + 1], 32);
-        bytes bytes2 = num2bin(val, 32);
-        verifierState[Config.MM_CHANNEL + 1] = sha256(bytes1 + bytes2);
-        verifierState[Config.MM_CHANNEL + 2] = 0;
-
+        VCReadOut readHashOut = VerifierChannel.readHash(channelIdx, true, verifierState);
+        int vcHash = readHashOut.val;
+        verifierState = readHashOut.verifierState;
+        verifierState = Utils.writeValUInt256(Config.MM_TRACE_COMMITMENT, vcHash, verifierState);
         verifierState[Config.MM_TRACE_COMMITMENT] = val;
 
         // Simulated interaction with prover.
-        // Send interaction elements.
-        verifierState = VerifierChannel.sendFieldElements(verifierState);
+        if (Config.N_COLUMNS_IN_TRACE_1 > 0) {
+            // Send interaction elements.
+            verifierState = VerifierChannel.sendFieldElements(channelIdx,
+                                        Config.N_INTERACTION_ELEMENTS, Config.MM_INTERACTION_ELEMENTS, verifierState);
 
+            // Read second trace commitment.
+            readHashOut = VerifierChannel.readHash(channelIdx, true, verifierState);
+            verifierState = VerifierChannel.sendFieldElements(channelIdx,
+                                        Config.MM_TRACE_COMMITMENT + 1, readHashOut.val, readHashOut.verifierState);
+        }
 
+        verifierState = VerifierChannel.sendFieldElements(channelIdx,
+                                    Config.N_COEFFICIENTS, Config.MM_COEFFICIENTS, verifierState);
+
+        readHashOut = VerifierChannel.readHash(channelIdx, true, verifierState);
+        verifierState = Utils.writeValUInt256(Config.MM_TRACE_COMMITMENT + 1, readHashOu.val, readHashOut.verifierState);
+
+        // Read the answers to the Out of Domain Sampling.
+        int lmmOodsVals = Config.MM_OODS_VALUES;
+        loop (Config.MM_OODS_VALUES + Config.N_OODS_VALUES) : i {
+            VCReadOut readFEOut = VerifierChannel.readFieldElements(channelIdx, true, verifierState);
+            verifierState = Utils.writeValUInt256(i, readFEOut.val, readFEOut.verifierState);
+        }
+
+        verifierState = oods_consistency_check(verifierState);
     
         return false;
     }
