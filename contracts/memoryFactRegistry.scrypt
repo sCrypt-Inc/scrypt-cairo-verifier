@@ -1,0 +1,230 @@
+import "utils.scrypt";
+import "config.scrypt";
+import "bootloader.scrypt";
+import "publicInputOffsets.scrypt";
+import "primeFieldElement.scrypt";
+
+
+library MemoryFactRegistry {
+
+    /*
+        Registers the fact for memory page 0, which includes:
+        1. The bootloader program,
+        2. Arguments and return values of main()
+        3. Some of the data required for computing the task facts. which is represented in
+            taskMetadata.
+        Returns information on the registered fact.
+        Assumptions: cairo_aux_input is connected to the public input, which is verified by
+        cairoVerifierContractAddresses.
+        Guarantees: taskMetadata is consistent with the public memory, with some sanity checks.
+    */
+    static function registerPublicMemoryMainPage(
+            TastMetadata taskMetadata,
+            CairoAuxInput cairoAuxInput,
+            GPSVerifierConstructorArgs constArgs) : OutputRegisterPubMainPage {
+
+        int publicMemoryLenght = Bootloader.COMPILED_BOOTLOADER_LEN + 
+                                 // return fp and pc =
+                                 2 +
+                                 Config.N_MAIN_ARGS +
+                                 Config.N_MAIN_RETURN_VALUES +
+                                 // Bootloader config size =
+                                 2 +
+                                 // Number of tasks cell =
+                                 1 +
+                                 2 *
+                                 taskMetadata.nTasks;
+
+        int[Config.MAX_PUBLIC_MEMORY_WORDS] publicMemory = repeat(0, Config.MAX_PUBLIC_MEMORY_WORDS);
+        int offset = 0;
+
+        // Write bootloader program to public memory.
+        // TODO: This could be predefined at compile time.
+        loop (Bootloader.COMPILED_BOOTLOADER_LEN) : i {
+            publicMemory[offset] = i + Config.INITIAL_PC;
+            publicMemory[offset + 1] = Bootloader.COMPILED_BOOTLOADER[i];
+            offset += 2;
+        }
+
+        // Execution segment - Make sure [initial_fp - 2] = initial_fp and .
+        // This is required for the "safe call" feature (that is, all "call" instructions will
+        // return, even if the called function is malicious).
+        // It guarantees that it's not possible to create a cycle in the call stack.
+        int initialFp = cairoAuxInput.executionBeginAddr;
+        require(initialFp >= 2);
+
+        publicMemory[offset + 0] = initialFp - 2;
+        publicMemory[offset + 1] = initialFp;
+        // Make sure [initial_fp - 1] = 0.
+        publicMemory[offset + 2] = initialFp - 1;
+        publicMemory[offset + 3] = 0;
+        offset += 4;
+
+        // Enforce main's arguments and return values.
+        // Note that the page hash depends on the order of the (address, value) pair in the
+        // publicMemory and consequently the arguments must be written before the return values.
+        int returnValuesAddress = cairoAuxInput.executionStopPtr - Config.N_BUILTINS;
+
+        loop (Config.N_BUILTINS) : i {
+            // Write argument address.
+            publicMemory[offset] = initialFp + i;
+            int returnValuesOffset = offset + 2 * Config.N_BUILTINS;
+
+            // Write return value offset.
+            publicMemory[returnValuesOffset] = returnValuesAddress + i;
+
+            // Write values.
+            // TODO: Can get rid of branching because SELECTED_BUILTINS is known at compile time.
+            if ((Config.SELECTED_BUILTINS & 1) != 0) {
+                // Set the argument to the builtin start pointer.
+                publicMemory[offset + 1] = cairoAuxInput.builtinStartPtr;
+                // Set the return value to the builtin stop pointer.
+                publicMemory[returnValuesOffset + 1] = cairoAuxInput.builtinStopPtr;
+            } else {
+                // Builtin is not present in layout, set the argument value and return value to 0.
+                publicMemory[offset + 1] = 0;
+                publicMemory[returnValuesOffset + 1] = 0;
+            }
+            offset += 2;
+        }
+
+        // Program output.
+        int outputAddress = cairoAuxInput.outputBeginAddr;
+        // Force that memory[outputAddress] and memory[outputAddress + 1] contain the
+        // bootloader config (which is 2 words size).
+        publicMemory[offset + 0] = outputAddress;
+        publicMemory[offset + 1] = constArgs.simpleBootloaderProgramHash;
+        publicMemory[offset + 2] = outputAddress + 1;
+        publicMemory[offset + 3] = constArgs.hashedSupportedCairoVerifiers;
+        publicMemory[offset + 4] = outputAddress + 2;
+        publicMemory[offset + 5] = taskMetadata.nTasks;
+        offset += 6;
+        outputAddress += 3;
+
+        bool end = false;
+        loop (Config.MAX_TASKS) : task {
+            if (task >= taskMetadata.nTasks) {
+                end = true;
+            }
+            if (!end) {
+                int outputSize = taskMetadata.taskOutputSizes[task];
+                require(outputSize >= 2 && outputSize <= Config.MAX_OUTPUT_SIZE);
+                int programHash = taskMetadata.programHashes[task];
+                int nTreePairs = taskMetadata.nTreePairs[task];
+                require(1 <= nTreePairs && nTreePairs <= Config.MAX_N_TREE_PAIRS);
+
+                // Force that memory[outputAddress] = outputSize.
+                publicMemory[offset + 0] = outputAddress;
+                publicMemory[offset + 1] = outputSize;
+                // Force that memory[outputAddress + 1] = programHash.
+                publicMemory[offset + 2] = outputAddress + 1;
+                publicMemory[offset + 3] = programHash;
+                offset += 4;
+                outputAddress += outputSize;
+            }
+        }
+
+        require(cairoAuxInput.outputStopPtr == outputAddress);
+
+        // Register memory page.
+        require((offset + 1) % 2 == 0); // Size of memory pairs must be even.
+        require(cairoAuxInput.z < PrimeFieldElement.K_MODULUS);
+        require(cairoAuxInput.alpha < PrimeFieldElement.K_MODULUS);
+
+        Fact pageFact = computeFact(publicMemory, 
+                                    offset,
+                                    cairoAuxInput.z,
+                                    cairoAuxInput.alpha);
+
+        // TODO: Do we need to keep a registry?
+        //registry.
+
+        return { publicMemoryLenght, pageFact };
+    }
+
+    /*
+    	Computes the cumulative product of the public memory cells:
+    	\prod_i( z - (addr_i + alpha * value_i) ).
+    	publicMemoryPtr is an array of nValues pairs (address, value).
+    	z and alpha are the perm and hash interaction elements required to calculate the product.
+    */
+    static function computePublicMemoryProd(
+                        int cumulativeProdsPtr,
+                        int nPubMemoryPages,
+                        bytes verifierState) : int {
+        int lastPtr = cumulativeProdsPtr + nPubMemoryPages;
+        int res = 1;
+        int ptr = cumulativeProdsPtr;
+
+        bool loopActive = true;
+        loop (15) : {  // TODO: Find out upper bound of loop.
+            if (ptr < lastPtr) {
+                loopActive = false;
+            }
+
+            if (loopActive) {
+                res = PrimeFieldElement.fmul(res, Utils.getVecValUInt256Len(ptr, verifierState));
+                ptr += 1;
+            }
+        }
+
+        return res;
+    }
+
+    /*
+        Computes the value of the public memory quotient:
+        numerator / (denominator * padding)
+        where:
+        numerator = (z - (0 + alpha * 0))^S,
+        denominator = \prod_i( z - (addr_i + alpha * value_i) ),
+        padding = (z - (padding_addr + alpha * padding_value))^(S - N),
+        N is the actual number of public memory cells,
+        and S is the number of cells allocated for the public memory (which includes the padding).
+    */
+    static function computePublicMemoryQuotient(bytes verifierState) : int {
+        int nValues = Utils.getVecValUInt256Len(Config.MM_N_PUBLIC_MEM_ENTRIES, verifierState);
+        int z = Utils.getVecValUInt256Len(Config.MM_MEMORY_MULTI_COLUMN_PERM_HASH_INTERACTION_ELM, verifierState);
+        int alpha = Utils.getVecValUInt256Len(Config.MM_MEMORY_MULTI_COLUMN_PERM_HASH_INTERACTION_ELM0, verifierState);        
+        // The size that is allocated to the public memory.
+        int pubMemSize = Utils.getVecValUInt256Len(Config.MM_TRACE_LENGTH,verifierState) / Config.PUBLIC_MEMORY_STEP);
+
+        require(nValues < 1000000);    // Overflow protection TODO 
+        require(nValues < pubMemSize); //Number of values of public memory is too large
+
+        int nPubMemoryPages = Utils.getVecValUInt256Len(config.MM_N_PUBLIC_MEM_PAGES, verifierState);
+        int cumulativeProdPtr = Utils.getVecValUInt256Len(Config.MM_PUBLIC_INPUT_PTR, verifierState) + 
+                                PublicInputOffsets.getOffsetPageProd(0, nPubMemoryPages);
+
+        int denominator = computePublicMemoryProd(cumulativeProdPtr, nPubMemoryPages, verifierState);
+
+        // Compute address + alpha * value for the first address-value pair for padding
+        int publicInputPtr = Utils.getVecValUInt256Len(Config.MM_PUBLIC_INPUT_PTR, verifierState);
+
+        int paddingAddr = Utils.getVecValUInt256Len(
+                                    publicInputPtr + PublicInputOffsets.OFFSET_PUBLIC_MEMORY_PADDING_ADDR, verifierState
+                        );
+        int paddingVal = Utils.getVecValUInt256Len(
+                                    publicInputPtr + PublicInputOffsets.OFFSET_PUBLIC_MEMORY_PADDING_ADDR + 1, verifierState
+                        );
+
+        int hashFirstAddressValue = PrimeFieldElement.fadd(
+                                        paddingAddr, PrimeFieldElement.fmul(paddingVal, alpha)
+                                    );
+                                
+        // Pad the denominator with the shifted value of hashFirstAddressValue.
+        int denomPad = PrimeFieldElement.fpow(
+                            PrimeFieldElement.fsub(z, hashFirstAddressValue),
+                            pubMemSize - nValues
+                        );
+        denominator = PrimeFieldElement.fmul(denominator, denomPad);
+
+        // Calculate the numerator.
+        int numerator = PrimeFieldElement.fpow(z, pubMemSize);
+
+        return PrimeFieldElement.fmul(
+                    numerator,
+                    PrimeFieldElement.inverse(denominator)
+                );
+    }
+
+}

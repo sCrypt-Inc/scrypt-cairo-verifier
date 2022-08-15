@@ -1,0 +1,97 @@
+import "utils.scrypt";
+import "config.scrypt";
+import "primeField.scrypt";
+
+
+///// LAYOUT 1 //////
+
+library PolynomialConstraints {
+
+    static function getCompositionFromTraceVal(bytes verifierState) : int {
+        
+        int res = 0;
+
+        int point = Utils.readValUInt256(Config.MM_OODS_POINT, verifierState);
+
+        // Calculate and store commonly used exponents
+        int expMods0 = PrimeFieldElement.fpow(point, Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState));
+        int expMods1 = PrimeFieldElement.fpow(point,
+                                              Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x10);
+        int expMods2 = PrimeFieldElement.fpow(point,
+                                              Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x2);
+        int expMods3 = PrimeFieldElement.fpow(point,
+                                              Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x8);
+        int expMods4 = PrimeFieldElement.fpow(point,
+                                              Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x20);
+        int expMods5 = PrimeFieldElement.fpow(point,
+                                              Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x100);
+        int expMods6 = PrimeFieldElement.fpow(point,
+                                              Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x200);
+        int expMods7 = PrimeFieldElement.fpow(point,
+                                              Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x80);
+        int expMods8 = PrimeFieldElement.fpow(point,
+                                              Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x1000);
+        int expMods9 = PrimeFieldElement.fpow(point,
+                                              Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x20);
+        int expMods10 = PrimeFieldElement.fpow(point,
+                                              Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x2000);
+        int expMods11 = PrimeFieldElement.fpow(Utils.readValUInt256(Config.MM_TRACE_GENERATOR, verifierState),
+                                              0xf * Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x10);
+        int expMods12 = PrimeFieldElement.fpow(Utils.readValUInt256(Config.MM_TRACE_GENERATOR, verifierState),
+                                            0x10 * (Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x10) - 0x1);
+        int expMods13 = PrimeFieldElement.fpow(Utils.readValUInt256(Config.MM_TRACE_GENERATOR, verifierState),
+                                            0x2 * (Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x2) - 0x1);
+        int expMods14 = PrimeFieldElement.fpow(Utils.readValUInt256(Config.MM_TRACE_GENERATOR, verifierState),
+                                            0x4 * (Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x4) - 0x1);
+        int expMods15 = PrimeFieldElement.fpow(Utils.readValUInt256(Config.MM_TRACE_GENERATOR, verifierState),
+                                            0xFF * (Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x100));
+        int expMods16 = PrimeFieldElement.fpow(Utils.readValUInt256(Config.MM_TRACE_GENERATOR, verifierState),
+                                            0x3F * (Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x40));
+        int expMods17 = PrimeFieldElement.fpow(Utils.readValUInt256(Config.MM_TRACE_GENERATOR, verifierState),
+                                              Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x2);
+        int expMods18 = PrimeFieldElement.fpow(Utils.readValUInt256(Config.MM_TRACE_GENERATOR, verifierState),
+                                            0x80 * (Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x80) - 0x1);
+        int expMods19 = PrimeFieldElement.fpow(Utils.readValUInt256(Config.MM_TRACE_GENERATOR, verifierState),
+                                            0xFB * (Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x100));
+        int expMods20 = PrimeFieldElement.fpow(Utils.readValUInt256(Config.MM_TRACE_GENERATOR, verifierState),
+                                            0x2000 * (Utils.readValUInt256(Config.MM_TRACE_LENGTH, verifierState) / 0x2000) - 0x1);
+
+
+        // Calculate denominators.
+        int denominators0 = PrimeFieldElement.fsub(expMods0, 0x1);
+        int denominators1 = PrimeFieldElement.fsub(expMods1, expMods11);
+        int denominators2 = PrimeFieldElement.fsub(expMods1, 0x1);
+        int denominators3 = PrimeFieldElement.fsub(point, 0x1);
+        int denominators4 = PrimeFieldElement.fsub(point, expMods12);
+        int denominators5 = PrimeFieldElement.fsub(expMods2, 0x1);
+        int denominators6 = PrimeFieldElement.fsub(point, expMods13);
+        int denominators7 = PrimeFieldElement.fsub(expMods3, 0x1);
+        int denominators8 = PrimeFieldElement.fsub(expMods4, 0x1);
+        int denominators9 = PrimeFieldElement.fsub(point, expMods14);
+        int denominators10 = PrimeFieldElement.fsub(expMods5, 0x1);
+        int denominators11 = PrimeFieldElement.fsub(expMods5, expMods16);
+        int denominators12 = PrimeFieldElement.fsub(expMods5, expMods15);
+        int denominators13 = PrimeFieldElement.fsub(expMods6, 0x1);
+        int denominators14 = PrimeFieldElement.fsub(expMods7, 0x1);
+        int denominators15 = PrimeFieldElement.fsub(expMods9, 0x1);
+        int denominators16 = PrimeFieldElement.fsub(expMods10, expMods19);
+        int denominators17 = PrimeFieldElement.fsub(expMods10, expMods15);
+        int denominators18 = PrimeFieldElement.fsub(expMods8, expMods19);
+        int denominators19 = PrimeFieldElement.fsub(expMods8, expMods15);
+        int denominators20 = PrimeFieldElement.fsub(expMods10, 0x1);
+        int denominators21 = PrimeFieldElement.fsub(expMods8, 0x1);
+
+
+        /* Compute the inverses of the denominators into denominatorInvs using batch inverse */
+
+
+        // Start by computing the cumulative product.
+        // Let (d_0, d_1, d_2, ..., d_{n-1}) be the values in denominators. After this loop
+        // denominatorInvs will be (1, d_0, d_0 * d_1, ...) and prod will contain the value of
+        // d_0 * ... * d_{n-1}.
+        // Compute the offset between the partialProducts array and the input values array.
+        int prod = 1;
+        int denominatorInv 
+    }
+
+}

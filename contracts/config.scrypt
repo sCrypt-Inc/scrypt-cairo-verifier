@@ -13,6 +13,7 @@ library Config {
 
     // Memory layout.
     static const int MM_CONTEXT_SIZE = 2316;
+    static const int MM_N_PUBLIC_MEM_ENTRIES = 2312;
     static const int MM_N_PUBLIC_MEM_PAGES = 2313;
     static const int MM_OFFSET_SIZE = 322;
     static const int MM_HALF_OFFSET_SIZE = 323;
@@ -57,6 +58,8 @@ library Config {
     static const int MM_MEMORY_MULTI_COLUMN_PERM_PERM_INTERACTION_ELM = 328;
     static const int MM_MEMORY_MULTI_COLUMN_PERM_HASH_INTERACTION_ELM0 = 329;
     static const int MM_RC16_PERM_INTERACTION_ELM = 331;
+
+    static const int PUBLIC_MEMORY_STEP = 8;
 
     static const int N_INTERACTION_ELEMENTS = 3;
     static const int N_COLUMNS_IN_TRACE_1 = 1;

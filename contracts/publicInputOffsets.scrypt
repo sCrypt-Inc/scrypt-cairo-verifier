@@ -1,0 +1,30 @@
+import "config.scrypt";
+
+
+library PublicInputOffsets {
+
+    static const int OFFSET_PUBLIC_MEMORY_PADDING_ADDR = 16;
+    static const int OFFSET_PUBLIC_MEMORY = 19;
+
+    static function getOffsetPageSize(int pageId) : int {
+        return OFFSET_PUBLIC_MEMORY + 3 * pageId;
+    }
+
+    static function getOffsetPageHash(int pageId) : int {
+        return OFFSET_PUBLIC_MEMORY + 3 * pageId + 1;
+    }
+
+    static function getOffsetPageAddr(int pageId) : int {
+        return OFFSET_PUBLIC_MEMORY + 3 * pageId - 1;
+    }
+
+    static function getOffsetPageProd(int pageId, int nPages) : int {
+        return OFFSET_PUBLIC_MEMORY + 3 * nPages - 1 + pageId;
+    }
+
+    static function getPublicInputLength(int nPages) : int {
+        return OFFSET_PUBLIC_MEMORY + 4 * nPages - 1;
+    }
+
+}
+
